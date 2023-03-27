@@ -20,10 +20,9 @@ Configuration file (config.ini) options:
 """
 
 from ipaddress import ip_address, ip_network
-from os import path
 from subprocess import run, DEVNULL
 from sys import exit
-from os import access, X_OK, chdir, environ, path
+from os import access, X_OK, chdir, environ, path, system
 from tempfile import TemporaryDirectory
 from waitress import serve
 from werkzeug import utils
@@ -38,17 +37,31 @@ DOCKER_BIN = '/usr/bin/docker'
 
 print("Tea Runner")
 
+
 # Debug is a command-line option, but most configuration comes from config.ini
 arg_parser = ArgumentParser()
 arg_parser.add_argument('-d', '--debug', action='store_true',
                         help='display debugging output while running')
+arg_parser.add_argument('-p', '--port', dest='port', type=int,
+                        help='port to run the server on', metavar='port', default=1706)
+arg_parser.add_argument('-s', '--ssh', dest='ssh', type=bool,
+                        help='if you want the request to be in ssh', metavar='ssh', default=False)
+
 args = arg_parser.parse_args()
 
 config = ConfigParser()
 config.read('config.ini')
 
+allowed_commands = []
+
+if config.get('runner', 'ALLOWED_COMMANDS', fallback='') != '':
+    allowed_commands = config.get('runner', 'ALLOWED_COMMANDS', fallback='').split(' | ')
+
 if args.debug:
     config.set('runner', 'DEBUG', "true")
+
+if args.ssh:
+    config.set('runner', 'TYPE', "ssh")
 
 if config.getboolean('runner', 'DEBUG', fallback='False') == True:
     logging.basicConfig(format='%(levelname)s: %(message)s',
@@ -131,13 +144,18 @@ def test():
 def rsync():
     body = request.get_json()
     dest = request.args.get('dest') or body['repository']['name']
+    got_commands = [] if request.args.get('command') == None else request.args.get('command').split(';') if request.args.get('command').split(';')[-1] != '' else request.args.get('command').split(';')[:-1]
+    commands = set(allowed_commands).intersection(got_commands)
     rsync_root = config.get('rsync', 'RSYNC_ROOT', fallback='')
+    clone_url = body['repository']['ssh_rl'] if config.get('runner', 'TYPE', fallback='https').lower() == 'ssh' else body['repository']['clone_url'] if config.get(
+        'cred', 'USERNAME', fallback='') == '' and config.get('cred', 'PASSWORD', fallback='') == '' else ''.join([body['repository']['clone_url'].split('://')[0] , '://' , config.get('cred', 'USERNAME', fallback='') , ':' , config.get('cred', 'PASSWORD', fallback='') , '@' , body['repository']['clone_url'].split('://')[1]])
+
     if rsync_root:
         dest = path.join(rsync_root, utils.secure_filename(dest))
         logging.debug('rsync dest path updated to ' + dest)
 
     with TemporaryDirectory() as temp_dir:
-        if git_clone(body['repository']['clone_url'], temp_dir):
+        if git_clone(clone_url, temp_dir):
             logging.info('rsync ' + body['repository']['name'] + ' to ' + dest)
             chdir(temp_dir)
             if config.get('rsync', 'DELETE', fallback=''):
@@ -160,6 +178,9 @@ def rsync():
                              )
             if result.returncode != 0:
                 return jsonify(status='rsync failed'), 500
+            else:
+                if commands != None:
+                    system('cd '+dest + ';' + " && ".join(commands))
         else:
             return jsonify(status='git clone failed'), 500
 
@@ -188,4 +209,4 @@ if __name__ == '__main__':
     logging.info('Limiting requests to: ' + config.get('runner',
                  'ALLOWED_IP_RANGE', fallback='<any>'))
     serve(app, host=config.get('runner', 'LISTEN_IP', fallback='0.0.0.0'),
-          port=config.getint('runner', 'LISTEN_PORT', fallback=1706))
+          port=config.getint('runner', 'LISTEN_PORT', fallback=args.port))
