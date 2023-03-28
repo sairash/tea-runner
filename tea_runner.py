@@ -35,7 +35,7 @@ GIT_BIN = '/usr/bin/git'
 RSYNC_BIN = '/usr/bin/rsync'
 DOCKER_BIN = '/usr/bin/docker'
 
-print("Tea Runner")
+print("Tea Sprint")
 
 
 # Debug is a command-line option, but most configuration comes from config.ini
