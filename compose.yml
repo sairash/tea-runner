@@ -1,8 +1,8 @@
 services:
-  tea-runner:
-    image: ghcr.io/davescodemusings/tea-runner
-    container_name: tea-runner
-    hostname: tea-runner
+  tea-sprint:
+    image: sairash/tea-sprint
+    container_name: tea-sprint
+    hostname: tea-sprint
     restart: unless-stopped
     ports:
       - "1706:1706"
